@@ -56,7 +56,7 @@ void ODBC::Init(v8::Handle<Object> target) {
   // Reserve space for one Handle<Value>
   Local<ObjectTemplate> instance_template = constructor_template->InstanceTemplate();
   instance_template->SetInternalFieldCount(1);
-  
+
   // Constants
   NODE_DEFINE_CONSTANT(constructor_template, SQL_CLOSE);
   NODE_DEFINE_CONSTANT(constructor_template, SQL_DROP);
@@ -65,7 +65,7 @@ void ODBC::Init(v8::Handle<Object> target) {
   NODE_DEFINE_CONSTANT(constructor_template, SQL_DESTROY); //SQL_DESTROY is non-standard
   NODE_DEFINE_CONSTANT(constructor_template, FETCH_ARRAY);
   NODE_DEFINE_CONSTANT(constructor_template, FETCH_OBJECT);
-  
+
   // Prototype Methods
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "createConnection", CreateConnection);
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "createConnectionSync", CreateConnectionSync);
@@ -73,17 +73,17 @@ void ODBC::Init(v8::Handle<Object> target) {
   // Attach the Database Constructor to the target object
   target->Set( v8::String::NewSymbol("ODBC"),
                constructor_template->GetFunction());
-  
+
   scope.Close(Undefined());
-  
+
 #if NODE_VERSION_AT_LEAST(0, 7, 9)
   // Initialize uv_async so that we can prevent node from exiting
   uv_async_init( uv_default_loop(),
                  &ODBC::g_async,
                  ODBC::WatcherCallback);
-  
+
   // Not sure if the init automatically calls uv_ref() because there is weird
-  // behavior going on. When ODBC::Init is called which initializes the 
+  // behavior going on. When ODBC::Init is called which initializes the
   // uv_async_t g_async above, there seems to be a ref which will keep it alive
   // but we only want this available so that we can uv_ref() later on when
   // we have a connection.
@@ -91,7 +91,7 @@ void ODBC::Init(v8::Handle<Object> target) {
   // so that there are no references on the loop.
   uv_unref((uv_handle_t *)&ODBC::g_async);
 #endif
-  
+
   // Initialize the cross platform mutex provided by libuv
   uv_mutex_init(&ODBC::g_odbcMutex);
 }
@@ -105,10 +105,10 @@ void ODBC::Free() {
   DEBUG_PRINTF("ODBC::Free\n");
   if (m_hEnv) {
     uv_mutex_lock(&ODBC::g_odbcMutex);
-    
+
     if (m_hEnv) {
       SQLFreeHandle(SQL_HANDLE_ENV, m_hEnv);
-      m_hEnv = NULL;      
+      m_hEnv = NULL;
     }
 
     uv_mutex_unlock(&ODBC::g_odbcMutex);
@@ -119,26 +119,26 @@ Handle<Value> ODBC::New(const Arguments& args) {
   DEBUG_PRINTF("ODBC::New\n");
   HandleScope scope;
   ODBC* dbo = new ODBC();
-  
+
   dbo->Wrap(args.Holder());
   dbo->m_hEnv = NULL;
-  
+
   uv_mutex_lock(&ODBC::g_odbcMutex);
-  
+
   int ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &dbo->m_hEnv);
-  
+
   uv_mutex_unlock(&ODBC::g_odbcMutex);
-  
+
   if (!SQL_SUCCEEDED(ret)) {
     DEBUG_PRINTF("ODBC::New - ERROR ALLOCATING ENV HANDLE!!\n");
-    
+
     Local<Object> objError = ODBC::GetSQLError(SQL_HANDLE_ENV, dbo->m_hEnv);
-    
+
     ThrowException(objError);
   }
-  
+
   SQLSetEnvAttr(dbo->m_hEnv, SQL_ATTR_ODBC_VERSION, (SQLPOINTER) SQL_OV_ODBC3, SQL_IS_UINTEGER);
-  
+
   return scope.Close(args.Holder());
 }
 
@@ -158,19 +158,19 @@ Handle<Value> ODBC::CreateConnection(const Arguments& args) {
   REQ_FUN_ARG(0, cb);
 
   ODBC* dbo = ObjectWrap::Unwrap<ODBC>(args.Holder());
-  
+
   //initialize work request
   uv_work_t* work_req = (uv_work_t *) (calloc(1, sizeof(uv_work_t)));
-  
+
   //initialize our data
-  create_connection_work_data* data = 
+  create_connection_work_data* data =
     (create_connection_work_data *) (calloc(1, sizeof(create_connection_work_data)));
 
   data->cb = Persistent<Function>::New(cb);
   data->dbo = dbo;
 
   work_req->data = data;
-  
+
   uv_queue_work(uv_default_loop(), work_req, UV_CreateConnection, (uv_after_work_cb)UV_AfterCreateConnection);
 
   dbo->Ref();
@@ -180,15 +180,15 @@ Handle<Value> ODBC::CreateConnection(const Arguments& args) {
 
 void ODBC::UV_CreateConnection(uv_work_t* req) {
   DEBUG_PRINTF("ODBC::UV_CreateConnection\n");
-  
+
   //get our work data
   create_connection_work_data* data = (create_connection_work_data *)(req->data);
-  
+
   uv_mutex_lock(&ODBC::g_odbcMutex);
 
   //allocate a new connection handle
   data->result = SQLAllocHandle(SQL_HANDLE_DBC, data->dbo->m_hEnv, &data->hDBC);
-  
+
   uv_mutex_unlock(&ODBC::g_odbcMutex);
 }
 
@@ -197,21 +197,21 @@ void ODBC::UV_AfterCreateConnection(uv_work_t* req, int status) {
   HandleScope scope;
 
   create_connection_work_data* data = (create_connection_work_data *)(req->data);
-  
+
   TryCatch try_catch;
-  
+
   if (!SQL_SUCCEEDED(data->result)) {
     Local<Value> args[1];
-    
+
     args[0] = ODBC::GetSQLError(SQL_HANDLE_ENV, data->dbo->m_hEnv);
-    
+
     data->cb->Call(Context::GetCurrent()->Global(), 1, args);
   }
   else {
     Local<Value> args[2];
     args[0] = External::New(data->dbo->m_hEnv);
     args[1] = External::New(data->hDBC);
-    
+
     Local<Object> js_result(ODBCConnection::constructor_template->
                               GetFunction()->NewInstance(2, args));
 
@@ -220,18 +220,18 @@ void ODBC::UV_AfterCreateConnection(uv_work_t* req, int status) {
 
     data->cb->Call(Context::GetCurrent()->Global(), 2, args);
   }
-  
+
   if (try_catch.HasCaught()) {
     FatalException(try_catch);
   }
 
-  
+
   data->dbo->Unref();
   data->cb.Dispose();
 
   free(data);
   free(req);
-  
+
   scope.Close(Undefined());
 }
 
@@ -244,18 +244,18 @@ Handle<Value> ODBC::CreateConnectionSync(const Arguments& args) {
   HandleScope scope;
 
   ODBC* dbo = ObjectWrap::Unwrap<ODBC>(args.Holder());
-   
+
   HDBC hDBC;
-  
+
   uv_mutex_lock(&ODBC::g_odbcMutex);
-  
+
   //allocate a new connection handle
   SQLRETURN ret = SQLAllocHandle(SQL_HANDLE_DBC, dbo->m_hEnv, &hDBC);
-  
+
   if (!SQL_SUCCEEDED(ret)) {
     //TODO: do something!
   }
-  
+
   uv_mutex_unlock(&ODBC::g_odbcMutex);
 
   Local<Value> params[2];
@@ -277,15 +277,15 @@ Column* ODBC::GetColumns(SQLHSTMT hStmt, short* colCount) {
   SQLSMALLINT buflen;
 
   //always reset colCount for the current result set to 0;
-  *colCount = 0; 
+  *colCount = 0;
 
   //get the number of columns in the result set
   ret = SQLNumResultCols(hStmt, colCount);
-  
+
   if (!SQL_SUCCEEDED(ret)) {
     return new Column[0];
   }
-  
+
   Column *columns = new Column[*colCount];
 
   for (int i = 0; i < *colCount; i++) {
@@ -293,10 +293,10 @@ Column* ODBC::GetColumns(SQLHSTMT hStmt, short* colCount) {
     columns[i].index = i + 1;
     //TODO:that's a lot of memory for each field name....
     columns[i].name = new unsigned char[MAX_FIELD_SIZE];
-    
+
     //set the first byte of name to \0 instead of memsetting the entire buffer
     columns[i].name[0] = '\0';
-    
+
     //get the column name
     ret = SQLColAttribute( hStmt,
                            columns[i].index,
@@ -309,10 +309,10 @@ Column* ODBC::GetColumns(SQLHSTMT hStmt, short* colCount) {
                            (SQLSMALLINT) MAX_FIELD_SIZE,
                            (SQLSMALLINT *) &buflen,
                            NULL);
-    
+
     //store the len attribute
     columns[i].len = buflen;
-    
+
     //get the column type and store it directly in column[i].type
     ret = SQLColAttribute( hStmt,
                            columns[i].index,
@@ -322,7 +322,7 @@ Column* ODBC::GetColumns(SQLHSTMT hStmt, short* colCount) {
                            NULL,
                            &columns[i].type);
   }
-  
+
   return columns;
 }
 
@@ -336,7 +336,7 @@ void ODBC::FreeColumns(Column* columns, short* colCount) {
   }
 
   delete [] columns;
-  
+
   *colCount = 0;
 }
 
@@ -344,7 +344,7 @@ void ODBC::FreeColumns(Column* columns, short* colCount) {
  * GetColumnValue
  */
 
-Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column, 
+Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
                                         uint16_t* buffer, int bufferLength) {
   HandleScope scope;
   SQLLEN len = 0;
@@ -352,27 +352,27 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
   //reset the buffer
   buffer[0] = '\0';
 
-  //TODO: SQLGetData can supposedly return multiple chunks, need to do this to 
+  //TODO: SQLGetData can supposedly return multiple chunks, need to do this to
   //retrieve large fields
-  int ret; 
-  
+  int ret;
+
   switch ((int) column.type) {
-    case SQL_INTEGER : 
+    case SQL_INTEGER :
     case SQL_SMALLINT :
     case SQL_TINYINT : {
         long value;
-        
+
         ret = SQLGetData(
-          hStmt, 
-          column.index, 
+          hStmt,
+          column.index,
           SQL_C_SLONG,
-          &value, 
-          sizeof(value), 
+          &value,
+          sizeof(value),
           &len);
-        
-        DEBUG_PRINTF("ODBC::GetColumnValue - Integer: index=%i name=%s type=%i len=%i ret=%i\n", 
+
+        DEBUG_PRINTF("ODBC::GetColumnValue - Integer: index=%i name=%s type=%i len=%i ret=%i\n",
                     column.index, column.name, column.type, len, ret);
-        
+
         if (len == SQL_NULL_DATA) {
           return scope.Close(Null());
           //return Null();
@@ -390,18 +390,18 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
     case SQL_REAL :
     case SQL_DOUBLE : {
         double value;
-        
+
         ret = SQLGetData(
-          hStmt, 
-          column.index, 
+          hStmt,
+          column.index,
           SQL_C_DOUBLE,
-          &value, 
-          sizeof(value), 
+          &value,
+          sizeof(value),
           &len);
-        
-         DEBUG_PRINTF("ODBC::GetColumnValue - Number: index=%i name=%s type=%i len=%i ret=%i val=%f\n", 
+
+         DEBUG_PRINTF("ODBC::GetColumnValue - Number: index=%i name=%s type=%i len=%i ret=%i val=%f\n",
                     column.index, column.name, column.type, len, ret, value);
-        
+
         if (len == SQL_NULL_DATA) {
           return scope.Close(Null());
           //return Null();
@@ -414,20 +414,20 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
       break;
     case SQL_DATETIME :
     case SQL_TIMESTAMP : {
-      //I am not sure if this is locale-safe or cross database safe, but it 
+      //I am not sure if this is locale-safe or cross database safe, but it
       //works for me on MSSQL
 #ifdef _WIN32
       struct tm timeInfo = {};
 
       ret = SQLGetData(
-        hStmt, 
-        column.index, 
+        hStmt,
+        column.index,
         SQL_C_CHAR,
-        (char *) buffer, 
-        bufferLength, 
+        (char *) buffer,
+        bufferLength,
         &len);
 
-      DEBUG_PRINTF("ODBC::GetColumnValue - W32 Timestamp: index=%i name=%s type=%i len=%i\n", 
+      DEBUG_PRINTF("ODBC::GetColumnValue - W32 Timestamp: index=%i name=%s type=%i len=%i\n",
                     column.index, column.name, column.type, len);
 
       if (len == SQL_NULL_DATA) {
@@ -437,16 +437,16 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
       else {
         strptime((char *) buffer, "%Y-%m-%d %H:%M:%S", &timeInfo);
 
-        //a negative value means that mktime() should use timezone information 
-        //and system databases to attempt to determine whether DST is in effect 
+        //a negative value means that mktime() should use timezone information
+        //and system databases to attempt to determine whether DST is in effect
         //at the specified time.
         timeInfo.tm_isdst = -1;
-          
+
         //return Date::New((double(mktime(&timeInfo)) * 1000));
         return scope.Close(Date::New((double(mktime(&timeInfo)) * 1000)));
       }
 #else
-      struct tm timeInfo = { 
+      struct tm timeInfo = {
         tm_sec : 0
         , tm_min : 0
         , tm_hour : 0
@@ -461,16 +461,16 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
       };
 
       SQL_TIMESTAMP_STRUCT odbcTime;
-      
+
       ret = SQLGetData(
-        hStmt, 
-        column.index, 
+        hStmt,
+        column.index,
         SQL_C_TYPE_TIMESTAMP,
-        &odbcTime, 
-        bufferLength, 
+        &odbcTime,
+        bufferLength,
         &len);
 
-      DEBUG_PRINTF("ODBC::GetColumnValue - Unix Timestamp: index=%i name=%s type=%i len=%i\n", 
+      DEBUG_PRINTF("ODBC::GetColumnValue - Unix Timestamp: index=%i name=%s type=%i len=%i\n",
                     column.index, column.name, column.type, len);
 
       if (len == SQL_NULL_DATA) {
@@ -485,8 +485,8 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
         timeInfo.tm_min = odbcTime.minute;
         timeInfo.tm_sec = odbcTime.second;
 
-        //a negative value means that mktime() should use timezone information 
-        //and system databases to attempt to determine whether DST is in effect 
+        //a negative value means that mktime() should use timezone information
+        //and system databases to attempt to determine whether DST is in effect
         //at the specified time.
         timeInfo.tm_isdst = -1;
 #ifdef TIMEGM
@@ -496,23 +496,23 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
         return scope.Close(Date::New((double(timelocal(&timeInfo)) * 1000)
                           + (odbcTime.fraction / 1000000)));
 #endif
-        //return Date::New((double(timegm(&timeInfo)) * 1000) 
+        //return Date::New((double(timegm(&timeInfo)) * 1000)
         //                  + (odbcTime.fraction / 1000000));
       }
 #endif
     } break;
     case SQL_BIT :
-      //again, i'm not sure if this is cross database safe, but it works for 
+      //again, i'm not sure if this is cross database safe, but it works for
       //MSSQL
       ret = SQLGetData(
-        hStmt, 
-        column.index, 
+        hStmt,
+        column.index,
         SQL_C_CHAR,
-        (char *) buffer, 
-        bufferLength, 
+        (char *) buffer,
+        bufferLength,
         &len);
 
-      DEBUG_PRINTF("ODBC::GetColumnValue - Bit: index=%i name=%s type=%i len=%i\n", 
+      DEBUG_PRINTF("ODBC::GetColumnValue - Bit: index=%i name=%s type=%i len=%i\n",
                     column.index, column.name, column.type, len);
 
       if (len == SQL_NULL_DATA) {
@@ -526,7 +526,7 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
     default :
       Local<String> str;
       int count = 0;
-      
+
       do {
         ret = SQLGetData(
           hStmt,
@@ -536,14 +536,14 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
           bufferLength,
           &len);
 
-        DEBUG_PRINTF("ODBC::GetColumnValue - String: index=%i name=%s type=%i len=%i value=%s ret=%i bufferLength=%i\n", 
+        DEBUG_PRINTF("ODBC::GetColumnValue - String: index=%i name=%s type=%i len=%i value=%s ret=%i bufferLength=%i\n",
                       column.index, column.name, column.type, len,(char *) buffer, ret, bufferLength);
 
-        if (len == SQL_NULL_DATA && str.IsEmpty()) {
+        if (int(len) == SQL_NULL_DATA && str.IsEmpty()) {
           return scope.Close(Null());
           //return Null();
         }
-        
+
         if (SQL_NO_DATA == ret) {
           //we have captured all of the data
           //double check that we have some data else return null
@@ -555,7 +555,7 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
         }
         else if (SQL_SUCCEEDED(ret)) {
           //we have not captured all of the data yet
-          
+
           if (count == 0) {
             //no concatenation required, this is our first pass
 #ifdef UNICODE
@@ -572,7 +572,7 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
             str = String::Concat(str, String::New((char *) buffer));
 #endif
           }
-          
+
           //if len is zero let's break out of the loop now and not attempt to
           //call SQLGetData again. The specific reason for this is because
           //some ODBC drivers may not correctly report SQL_NO_DATA the next
@@ -580,7 +580,7 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
           if (len == 0) {
             break;
           }
-          
+
           count += 1;
         }
         else {
@@ -593,18 +593,18 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
           assert(ret != SQL_INVALID_HANDLE);
 
           //Not sure if throwing here will work out well for us but we can try
-          //since we should have a valid handle and the error is something we 
+          //since we should have a valid handle and the error is something we
           //can look into
           return ThrowException(ODBC::GetSQLError(
              SQL_HANDLE_STMT,
              hStmt,
              (char *) "[node-odbc] Error in ODBC::GetColumnValue"
            ));
-          
+
           break;
         }
       } while (true);
-      
+
       return scope.Close(str);
       //return str;
   }
@@ -614,13 +614,13 @@ Handle<Value> ODBC::GetColumnValue( SQLHSTMT hStmt, Column column,
  * GetRecordTuple
  */
 
-Local<Object> ODBC::GetRecordTuple ( SQLHSTMT hStmt, Column* columns, 
+Local<Object> ODBC::GetRecordTuple ( SQLHSTMT hStmt, Column* columns,
                                          short* colCount, uint16_t* buffer,
                                          int bufferLength) {
   HandleScope scope;
-  
+
   Local<Object> tuple = Object::New();
-        
+
   for(int i = 0; i < *colCount; i++) {
 #ifdef UNICODE
     tuple->Set( String::New((uint16_t *) columns[i].name),
@@ -630,7 +630,7 @@ Local<Object> ODBC::GetRecordTuple ( SQLHSTMT hStmt, Column* columns,
                 GetColumnValue( hStmt, columns[i], buffer, bufferLength));
 #endif
   }
-  
+
   //return tuple;
   return scope.Close(tuple);
 }
@@ -639,18 +639,18 @@ Local<Object> ODBC::GetRecordTuple ( SQLHSTMT hStmt, Column* columns,
  * GetRecordArray
  */
 
-Handle<Value> ODBC::GetRecordArray ( SQLHSTMT hStmt, Column* columns, 
+Handle<Value> ODBC::GetRecordArray ( SQLHSTMT hStmt, Column* columns,
                                          short* colCount, uint16_t* buffer,
                                          int bufferLength) {
   HandleScope scope;
-  
+
   Local<Array> array = Array::New();
-        
+
   for(int i = 0; i < *colCount; i++) {
     array->Set( Integer::New(i),
                 GetColumnValue( hStmt, columns[i], buffer, bufferLength));
   }
-  
+
   //return array;
   return scope.Close(array);
 }
@@ -662,16 +662,16 @@ Handle<Value> ODBC::GetRecordArray ( SQLHSTMT hStmt, Column* columns,
 Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
   DEBUG_PRINTF("ODBC::GetParametersFromArray\n");
   *paramCount = values->Length();
-  
+
   Parameter* params = NULL;
-  
+
   if (*paramCount > 0) {
     params = (Parameter *) malloc(*paramCount * sizeof(Parameter));
   }
-  
+
   for (int i = 0; i < *paramCount; i++) {
     Local<Value> value = values->Get(i);
-    
+
     params[i].size          = 0;
     params[i].length        = SQL_NULL_DATA;
     params[i].buffer_length = 0;
@@ -683,13 +683,13 @@ Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
     if (value->IsString()) {
       Local<String> string = value->ToString();
       int length = string->Length();
-      
+
       params[i].c_type        = SQL_C_TCHAR;
 #ifdef UNICODE
       params[i].type          = SQL_WLONGVARCHAR;
       params[i].buffer_length = (length * sizeof(uint16_t)) + sizeof(uint16_t);
 #else
-      params[i].type          = SQL_LONGVARCHAR;
+      params[i].type          = SQL_VARCHAR;
       params[i].buffer_length = string->Utf8Length() + 1;
 #endif
       params[i].buffer        = malloc(params[i].buffer_length);
@@ -705,7 +705,7 @@ Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
       DEBUG_PRINTF("ODBC::GetParametersFromArray - IsString(): params[%i] "
                    "c_type=%i type=%i buffer_length=%i size=%i length=%i "
                    "value=%s\n", i, params[i].c_type, params[i].type,
-                   params[i].buffer_length, params[i].size, params[i].length, 
+                   params[i].buffer_length, params[i].size, params[i].length,
                    (char*) params[i].buffer);
     }
     else if (value->IsNull()) {
@@ -724,7 +724,7 @@ Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
       params[i].type   = SQL_BIGINT;
       params[i].buffer = number;
       params[i].length = 0;
-      
+
       DEBUG_PRINTF("ODBC::GetParametersFromArray - IsInt32(): params[%i] "
                    "c_type=%i type=%i buffer_length=%i size=%i length=%i "
                    "value=%lld\n", i, params[i].c_type, params[i].type,
@@ -733,7 +733,7 @@ Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
     }
     else if (value->IsNumber()) {
       double *number   = new double(value->NumberValue());
-      
+
       params[i].c_type        = SQL_C_DOUBLE;
       params[i].type          = SQL_DECIMAL;
       params[i].buffer        = number;
@@ -755,14 +755,14 @@ Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
       params[i].type   = SQL_BIT;
       params[i].buffer = boolean;
       params[i].length = 0;
-      
+
       DEBUG_PRINTF("ODBC::GetParametersFromArray - IsBoolean(): params[%i] "
                    "c_type=%i type=%i buffer_length=%i size=%i length=%i\n",
                    i, params[i].c_type, params[i].type,
                    params[i].buffer_length, params[i].size, params[i].length);
     }
-  } 
-  
+  }
+
   return params;
 }
 
@@ -771,10 +771,10 @@ Parameter* ODBC::GetParametersFromArray (Local<Array> values, int *paramCount) {
  */
 
 Handle<Value> ODBC::CallbackSQLError (SQLSMALLINT handleType,
-                                      SQLHANDLE handle, 
+                                      SQLHANDLE handle,
                                       Persistent<Function> cb) {
   HandleScope scope;
-  
+
   return scope.Close(CallbackSQLError(
     handleType,
     handle,
@@ -787,17 +787,17 @@ Handle<Value> ODBC::CallbackSQLError (SQLSMALLINT handleType,
                                       char* message,
                                       Persistent<Function> cb) {
   HandleScope scope;
-  
+
   Local<Object> objError = ODBC::GetSQLError(
-    handleType, 
-    handle, 
+    handleType,
+    handle,
     message
   );
-  
+
   Local<Value> args[1];
   args[0] = objError;
   cb->Call(Context::GetCurrent()->Global(), 1, args);
-  
+
   return scope.Close(Undefined());
 }
 
@@ -807,7 +807,7 @@ Handle<Value> ODBC::CallbackSQLError (SQLSMALLINT handleType,
 
 Local<Object> ODBC::GetSQLError (SQLSMALLINT handleType, SQLHANDLE handle) {
   HandleScope scope;
-  
+
   return scope.Close(GetSQLError(
     handleType,
     handle,
@@ -816,15 +816,15 @@ Local<Object> ODBC::GetSQLError (SQLSMALLINT handleType, SQLHANDLE handle) {
 
 Local<Object> ODBC::GetSQLError (SQLSMALLINT handleType, SQLHANDLE handle, char* message) {
   HandleScope scope;
-  
+
   DEBUG_PRINTF("ODBC::GetSQLError : handleType=%i, handle=%p\n", handleType, handle);
-  
+
   Local<Object> objError = Object::New();
   Local<String> str = String::New("");
 
   SQLINTEGER i = 0;
   SQLINTEGER native;
-  
+
   SQLSMALLINT len;
   SQLINTEGER statusRecCount;
   SQLRETURN ret;
@@ -845,17 +845,17 @@ Local<Object> ODBC::GetSQLError (SQLSMALLINT handleType, SQLHANDLE handle, char*
 
   for (i = 0; i < statusRecCount; i++){
     DEBUG_PRINTF("ODBC::GetSQLError : calling SQLGetDiagRec; i=%i, statusRecCount=%i\n", i, statusRecCount);
-    
+
     ret = SQLGetDiagRec(
-      handleType, 
+      handleType,
       handle,
-      i + 1, 
+      i + 1,
       (SQLTCHAR *) errorSQLState,
       &native,
       (SQLTCHAR *) errorMessage,
       ERROR_MESSAGE_BUFFER_CHARS,
       &len);
-    
+
     DEBUG_PRINTF("ODBC::GetSQLError : after SQLGetDiagRec; i=%i\n", i);
 
     if (SQL_SUCCEEDED(ret)) {
@@ -895,54 +895,54 @@ Local<Object> ODBC::GetSQLError (SQLSMALLINT handleType, SQLHANDLE handle, char*
  * GetAllRecordsSync
  */
 
-Local<Array> ODBC::GetAllRecordsSync (HENV hENV, 
-                                     HDBC hDBC, 
+Local<Array> ODBC::GetAllRecordsSync (HENV hENV,
+                                     HDBC hDBC,
                                      HSTMT hSTMT,
                                      uint16_t* buffer,
                                      int bufferLength) {
   DEBUG_PRINTF("ODBC::GetAllRecordsSync\n");
-  
+
   HandleScope scope;
-  
+
   Local<Object> objError = Object::New();
-  
+
   int count = 0;
   int errorCount = 0;
   short colCount = 0;
-  
+
   Column* columns = GetColumns(hSTMT, &colCount);
-  
+
   Local<Array> rows = Array::New();
-  
+
   //loop through all records
   while (true) {
     SQLRETURN ret = SQLFetch(hSTMT);
-    
+
     //check to see if there was an error
     if (ret == SQL_ERROR)  {
       //TODO: what do we do when we actually get an error here...
       //should we throw??
-      
+
       errorCount++;
-      
+
       objError = ODBC::GetSQLError(
-        SQL_HANDLE_STMT, 
+        SQL_HANDLE_STMT,
         hSTMT,
         (char *) "[node-odbc] Error in ODBC::GetAllRecordsSync"
       );
-      
+
       break;
     }
-    
+
     //check to see if we are at the end of the recordset
     if (ret == SQL_NO_DATA) {
       ODBC::FreeColumns(columns, &colCount);
-      
+
       break;
     }
 
     rows->Set(
-      Integer::New(count), 
+      Integer::New(count),
       ODBC::GetRecordTuple(
         hSTMT,
         columns,
@@ -961,11 +961,11 @@ Local<Array> ODBC::GetAllRecordsSync (HENV hENV,
 #ifdef dynodbc
 Handle<Value> ODBC::LoadODBCLibrary(const Arguments& args) {
   HandleScope scope;
-  
+
   REQ_STR_ARG(0, js_library);
-  
+
   bool result = DynLoadODBC(*js_library);
-  
+
   return scope.Close((result) ? True() : False());
 }
 #endif
@@ -975,7 +975,7 @@ extern "C" void init (v8::Handle<Object> target) {
   target->Set(String::NewSymbol("loadODBCLibrary"),
         FunctionTemplate::New(ODBC::LoadODBCLibrary)->GetFunction());
 #endif
-  
+
   ODBC::Init(target);
   ODBCResult::Init(target);
   ODBCConnection::Init(target);
